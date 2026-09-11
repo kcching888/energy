@@ -17,7 +17,9 @@
   <body>
     <div class="container">
       <h3>Utility Bill Extractor</h3>
-      <input type="text" id="fileId" placeholder="Paste Google Drive File ID here...">
+      
+      <!-- Changed to accept file uploads (PDF only) -->
+      <input type="file" id="pdfFile" accept="application/pdf">
       <button onclick="runExtraction()">Extract Figures</button>
       
       <div id="loader">Processing OCR... please wait.</div>
@@ -36,16 +38,33 @@
 
     <script>
       function runExtraction() {
-        const id = document.getElementById('fileId').value;
-        if (!id) return alert("Please enter a File ID");
+        const fileInput = document.getElementById('pdfFile');
+        const file = fileInput.files[0];
         
+        if (!file) return alert("Please select a PDF file first.");
+
         document.getElementById('loader').style.display = 'block';
         document.getElementById('result').style.display = 'none';
 
-        google.script.run
-          .withSuccessHandler(showResults)
-          .withFailureHandler(msg => alert(msg))
-          .processPdfFromId(id);
+        // Read file as Base64 to pass it to Google Apps Script
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const fileData = {
+            base64: e.target.result.split(',')[1],
+            name: file.name,
+            mimeType: file.type
+          };
+
+          google.script.run
+            .withSuccessHandler(showResults)
+            .withFailureHandler(msg => {
+              document.getElementById('loader').style.display = 'none';
+              alert(msg);
+            })
+            .processPdfFile(fileData); // Calls backend function accepting the file object
+        };
+
+        reader.readAsDataURL(file);
       }
 
       function showResults(data) {
