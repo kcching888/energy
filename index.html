@@ -70,10 +70,42 @@
             mimeType: file.type
           };
 
-          google.script.run
-            .withSuccessHandler(showResults)
-            .withFailureHandler(handleError)
-            .processPdfFile(fileData);
+          // Replace with your Web App URL after deploying
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxJR5LBtmtS3PtslVOJiOoQpOvSyBQBtNtxDm1RWvWSvm-ZZhhRle0V83LhOjXwm7LG2w/exec";
+
+function runExtraction() {
+  const fileInput = document.getElementById('pdfFile');
+  const file = fileInput.files[0];
+  
+  if (!file) return alert("Please select a PDF file first.");
+
+  document.getElementById('loader').style.display = 'block';
+  document.getElementById('result').style.display = 'none';
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const base64Data = e.target.result.split(',')[1];
+    
+    fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      body: JSON.stringify({
+        fileData: {
+          base64: base64Data,
+          name: file.name,
+          mimeType: file.type
+        }
+      })
+    })
+    .then(res => res.json())
+    .then(data => showResults(data))
+    .catch(err => {
+      document.getElementById('loader').style.display = 'none';
+      alert("Error: " + err.message);
+    });
+  };
+
+  reader.readAsDataURL(file);
+}
         };
 
         reader.onerror = function() {
