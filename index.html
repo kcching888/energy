@@ -2,16 +2,21 @@
 <html>
   <head>
     <base target="_top">
+    <meta charset="UTF-8">
+    <title>Utility Bill Extractor</title>
+    <!-- Load PDF.js library from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
       body { font-family: sans-serif; padding: 20px; background: #f4f7f6; }
       .container { max-width: 500px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
       input { width: 100%; padding: 10px; margin: 10px 0; box-sizing: border-box; }
-      button { width: 100%; padding: 10px; background: #2ecc71; color: white; border: none; cursor: pointer; border-radius: 4px; }
+      button { width: 100%; padding: 10px; background: #2ecc71; color: white; border: none; cursor: pointer; border-radius: 4px; font-weight: bold; }
+      button:disabled { background: #95a5a6; cursor: not-allowed; }
       .result-card { margin-top: 20px; display: none; border-top: 2px solid #eee; padding-top: 15px; }
       .data-row { display: flex; justify-content: space-between; margin-bottom: 10px; }
       .label { font-weight: bold; color: #555; }
       .value { color: #2c3e50; }
-      #loader { display: none; text-align: center; color: #3498db; margin-top: 15px; }
+      #loader { display: none; text-align: center; color: #3498db; margin-top: 15px; font-weight: bold; }
     </style>
   </head>
   <body>
@@ -21,7 +26,7 @@
       <input type="file" id="pdfFile" accept="application/pdf">
       <button id="extractBtn" onclick="runExtraction()">Extract Figures</button>
       
-      <div id="loader">Processing OCR... please wait.</div>
+      <div id="loader">Extracting text locally... please wait.</div>
 
       <div id="result" class="result-card">
         <div class="data-row"><span class="label">Bill Date:</span> <span id="resDate" class="value"></span></div>
@@ -36,15 +41,15 @@
     </div>
 
     <script>
-      let timeoutGuard;
+      // Configure PDF.js worker location
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
       function resetUI() {
-        clearTimeout(timeoutGuard);
         document.getElementById('loader').style.display = 'none';
         document.getElementById('extractBtn').disabled = false;
       }
 
-      function runExtraction() {
+      async function runExtraction() {
         const fileInput = document.getElementById('pdfFile');
         const file = fileInput.files[0];
         
@@ -55,82 +60,62 @@
         document.getElementById('result').style.display = 'none';
         document.getElementById('extractBtn').disabled = true;
 
-        // Set a 30-second timeout fallback in case of execution timeouts
-        timeoutGuard = setTimeout(() => {
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          
+          let fullText = "";
+          
+          // Read up to the first 3 pages (utility summaries are almost always on page 1)
+          const pagesToRead = Math.min(pdf.numPages, 3);
+          for (let i = 1; i <= pagesToRead; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map(item => item.str).join(" ");
+            fullText += pageText + "\n";
+          }
+
+          if (!fullText.trim()) {
+            alert("No selectable text found. This PDF may be a flat scanned image requiring server-side OCR.");
+            resetUI();
+            return;
+          }
+
+          const extractedData = parseBillText(fullText);
+          showResults(extractedData);
+
+        } catch (error) {
+          console.error(error);
+          alert("Error parsing PDF file: " + error.message);
           resetUI();
-          alert("Request timed out. The file might be too large or Drive API OCR took too long.");
-        }, 120000);
-
-        const reader = new FileReader();
-        reader.onload = function(e) {
-          const base64Data = e.target.result.split(',')[1];
-          const fileData = {
-            base64: base64Data,
-            name: file.name,
-            mimeType: file.type
-          };
-
-          // Replace with your Web App URL after deploying
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxJR5LBtmtS3PtslVOJiOoQpOvSyBQBtNtxDm1RWvWSvm-ZZhhRle0V83LhOjXwm7LG2w/exec";
-
-function runExtraction() {
-  const fileInput = document.getElementById('pdfFile');
-  const file = fileInput.files[0];
-  
-  if (!file) return alert("Please select a PDF file first.");
-
-  document.getElementById('loader').style.display = 'block';
-  document.getElementById('result').style.display = 'none';
-
-  const reader = new FileReader();
-  reader.onload = function(e) {
-    const base64Data = e.target.result.split(',')[1];
-    
-    fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      body: JSON.stringify({
-        fileData: {
-          base64: base64Data,
-          name: file.name,
-          mimeType: file.type
         }
-      })
-    })
-    .then(res => res.json())
-    .then(data => showResults(data))
-    .catch(err => {
-      document.getElementById('loader').style.display = 'none';
-      alert("Error: " + err.message);
-    });
-  };
+      }
 
-  reader.readAsDataURL(file);
-}
+      function parseBillText(text) {
+        // RegEx matchers targeting typical utility bill formatting
+        const dateMatch = text.match(/(?:Bill Date|Statement Date)[:\s]+([A-Za-z]+\s+\d{1,2},\s+\d{4}|\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+        const accountMatch = text.match(/(?:Account #|Account Number)[:\s]+([\d-]+)/i);
+        const elecMatch = text.match(/(?:Electricity|Electric)[:\s]+\$?([\d,]+\.\d{2})/i);
+        const gasMatch = text.match(/(?:Natural Gas|Gas)[:\s]+\$?([\d,]+\.\d{2})/i);
+        const totalMatch = text.match(/(?:Total Due|Amount Due|Total Amount Due)[:\s]+\$?([\d,]+\.\d{2})/i);
+
+        return {
+          date: dateMatch ? dateMatch[1] : "N/A",
+          account: accountMatch ? accountMatch[1] : "N/A",
+          electricity: elecMatch ? elecMatch[1] : "0.00",
+          gas: gasMatch ? gasMatch[1] : "0.00",
+          total: totalMatch ? totalMatch[1] : "0.00"
         };
-
-        reader.onerror = function() {
-          resetUI();
-          alert("Failed to read local file.");
-        };
-
-        reader.readAsDataURL(file);
       }
 
       function showResults(data) {
         resetUI();
-        if (!data || data.error) return alert("Error: " + (data ? data.error : "Unknown error occurred"));
-
-        document.getElementById('resDate').innerText = data.date || "N/A";
-        document.getElementById('resAccount').innerText = data.account || "N/A";
-        document.getElementById('resElec').innerText = "$" + (data.electricity || "0.00");
-        document.getElementById('resGas').innerText = "$" + (data.gas || "0.00");
-        document.getElementById('resTotal').innerText = "$" + (data.total || "0.00");
+        document.getElementById('resDate').innerText = data.date;
+        document.getElementById('resAccount').innerText = data.account;
+        document.getElementById('resElec').innerText = "$" + data.electricity;
+        document.getElementById('resGas').innerText = "$" + data.gas;
+        document.getElementById('resTotal').innerText = "$" + data.total;
         document.getElementById('result').style.display = 'block';
-      }
-
-      function handleError(error) {
-        resetUI();
-        alert("Server Error: " + (error.message || error));
       }
     </script>
   </body>
