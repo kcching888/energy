@@ -59,7 +59,7 @@
         timeoutGuard = setTimeout(() => {
           resetUI();
           alert("Request timed out. The file might be too large or Drive API OCR took too long.");
-        }, 30000);
+        }, 120000);
 
         const reader = new FileReader();
         reader.onload = function(e) {
