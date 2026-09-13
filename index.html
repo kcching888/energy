@@ -11,16 +11,15 @@
       .data-row { display: flex; justify-content: space-between; margin-bottom: 10px; }
       .label { font-weight: bold; color: #555; }
       .value { color: #2c3e50; }
-      #loader { display: none; text-align: center; color: #3498db; }
+      #loader { display: none; text-align: center; color: #3498db; margin-top: 15px; }
     </style>
   </head>
   <body>
     <div class="container">
       <h3>Utility Bill Extractor</h3>
       
-      <!-- Changed to accept file uploads (PDF only) -->
       <input type="file" id="pdfFile" accept="application/pdf">
-      <button onclick="runExtraction()">Extract Figures</button>
+      <button id="extractBtn" onclick="runExtraction()">Extract Figures</button>
       
       <div id="loader">Processing OCR... please wait.</div>
 
@@ -37,46 +36,69 @@
     </div>
 
     <script>
+      let timeoutGuard;
+
+      function resetUI() {
+        clearTimeout(timeoutGuard);
+        document.getElementById('loader').style.display = 'none';
+        document.getElementById('extractBtn').disabled = false;
+      }
+
       function runExtraction() {
         const fileInput = document.getElementById('pdfFile');
         const file = fileInput.files[0];
         
         if (!file) return alert("Please select a PDF file first.");
+        if (file.type !== "application/pdf") return alert("Please select a valid PDF file.");
 
         document.getElementById('loader').style.display = 'block';
         document.getElementById('result').style.display = 'none';
+        document.getElementById('extractBtn').disabled = true;
 
-        // Read file as Base64 to pass it to Google Apps Script
+        // Set a 30-second timeout fallback in case of execution timeouts
+        timeoutGuard = setTimeout(() => {
+          resetUI();
+          alert("Request timed out. The file might be too large or Drive API OCR took too long.");
+        }, 30000);
+
         const reader = new FileReader();
         reader.onload = function(e) {
+          const base64Data = e.target.result.split(',')[1];
           const fileData = {
-            base64: e.target.result.split(',')[1],
+            base64: base64Data,
             name: file.name,
             mimeType: file.type
           };
 
           google.script.run
             .withSuccessHandler(showResults)
-            .withFailureHandler(msg => {
-              document.getElementById('loader').style.display = 'none';
-              alert(msg);
-            })
-            .processPdfFile(fileData); // Calls backend function accepting the file object
+            .withFailureHandler(handleError)
+            .processPdfFile(fileData);
+        };
+
+        reader.onerror = function() {
+          resetUI();
+          alert("Failed to read local file.");
         };
 
         reader.readAsDataURL(file);
       }
 
       function showResults(data) {
-        document.getElementById('loader').style.display = 'none';
-        if (data.error) return alert("Error: " + data.error);
+        resetUI();
+        if (!data || data.error) return alert("Error: " + (data ? data.error : "Unknown error occurred"));
 
-        document.getElementById('resDate').innerText = data.date;
-        document.getElementById('resAccount').innerText = data.account;
-        document.getElementById('resElec').innerText = "$" + data.electricity;
-        document.getElementById('resGas').innerText = "$" + data.gas;
-        document.getElementById('resTotal').innerText = "$" + data.total;
+        document.getElementById('resDate').innerText = data.date || "N/A";
+        document.getElementById('resAccount').innerText = data.account || "N/A";
+        document.getElementById('resElec').innerText = "$" + (data.electricity || "0.00");
+        document.getElementById('resGas').innerText = "$" + (data.gas || "0.00");
+        document.getElementById('resTotal').innerText = "$" + (data.total || "0.00");
         document.getElementById('result').style.display = 'block';
+      }
+
+      function handleError(error) {
+        resetUI();
+        alert("Server Error: " + (error.message || error));
       }
     </script>
   </body>
